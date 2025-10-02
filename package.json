@@ -1,0 +1,16 @@
+{
+  "name": "fntr-queue",
+  "version": "1.0.0",
+  "description": "Fortnite lobby bot for the FNTR Official Discord Server",
+  "main": "main.js",
+  "scripts": {
+    "start": "node main.js"
+  },
+  "author": "dradcl (patched)",
+  "license": "ISC",
+  "dependencies": {
+    "discord.js": "^12.5.3",
+    "epicgames-fortnite-client": "github:SzymonLisowiec/node-epicgames-fortnite-client",
+    "request": "^2.88.2"
+  }
+}
