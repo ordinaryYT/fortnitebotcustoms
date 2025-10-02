@@ -1,12 +1,12 @@
 const { Client } = require('discord.js');
-const { Fortnite, Platforms } = require('epicgames-fortnite-client');
+const { Fortnite } = require('epicgames-fortnite-client');
 const fs = require('fs');
 const request = require('request');
 
 const client = new Client();
 
 const MIN_PLAYERS = 2;
-const PUBLIC_CHANNEL_ID = '617341908884389908';  // change to your channel IDs
+const PUBLIC_CHANNEL_ID = '617341908884389908';  // change to your Discord channel IDs
 const ADMIN_CHANNEL_ID = '650615163283570689';
 
 let players = [];
@@ -16,20 +16,20 @@ const fortnite = new Fortnite({
   debugger: () => {},
   credentials: {
     deviceAuth: {
-      device_id: "YOUR_DEVICE_ID",
-      account_id: "YOUR_ACCOUNT_ID",
-      secret: "YOUR_SECRET"
+      device_id: process.env.FN_DEVICE_ID,
+      account_id: process.env.FN_ACCOUNT_ID,
+      secret: process.env.FN_SECRET
     }
   },
   settings: {
-    platform: Platforms.WINDOWS,
+    platform: "WIN",
   }
 });
 
 // --- Discord Bot ---
 client.on('ready', () => {
   console.log(`Logged in as ${client.user.tag}!`);
-  client.user.setActivity("Team Rumble", { type: "PLAYING" });
+  client.user.setActivity("FNTR Queue", { type: "PLAYING" });
 });
 
 // Get new cosmetics list
@@ -52,38 +52,47 @@ request('https://benbotfn.tk/api/v1/newCosmetics', { json: true }, (err, res, bo
   await fortnite.party.sendPartyPresence("Lobby bot for FNTR Official\n 24/7 Lobbies\n Join at discord.gg/fntr");
   await fortnite.me.setReadiness("SittingOut");
 
-  fortnite.stream.on('friend#request', async req => {
+  // Auto-accept friend requests
+  fortnite.stream.on('friend:request', async req => {
     await req.accept();
   });
 
-  fortnite.stream.on('member#join', async (member) => {
-    const account = await fortnite.launcher.getAccount(member.id);
-    console.log(`${account.displayName} joined (${account.id})`);
-    players.push(account.id);
+  // Member joined
+  fortnite.stream.on('party:member:joined', async (member) => {
+    try {
+      const account = await fortnite.account.fetch(member.id);
+      console.log(`${account.displayName} joined (${account.id})`);
+      players.push(account.id);
 
-    fs.readFile('./blacklist.json', 'utf8', (err, data) => {
-      if (err) return;
-      const banned = JSON.parse(data);
-      if (banned.users.includes(account.id)) {
-        fortnite.party.kick(account.id);
+      // blacklist check
+      fs.readFile('./blacklist.json', 'utf8', (err, data) => {
+        if (err) return;
+        const banned = JSON.parse(data);
+        if (banned.users.includes(account.id)) {
+          fortnite.party.kick(account.id);
+        }
+      });
+
+      if (players.length >= MIN_PLAYERS) {
+        setTimeout(() => {
+          fortnite.party.leave(true);
+          players = [];
+        }, 5000);
       }
-    });
-
-    if (players.length >= MIN_PLAYERS) {
-      setTimeout(() => {
-        fortnite.party.leave(true);
-        players = [];
-      }, 5000);
+    } catch (err) {
+      console.error("Error handling join:", err);
     }
   });
 
-  fortnite.stream.on('member#leave', async (member) => {
+  // Member left
+  fortnite.stream.on('party:member:left', async (member) => {
     await fortnite.party.sendPartyPresence("Lobby bot for FNTR Official\n 24/7 Lobbies\n Join at discord.gg/fntr");
     players = players.filter(p => p !== member.id);
   });
 
-  fortnite.stream.on('message', async (msg) => {
-    const args = msg.message.split(" ");
+  // Whisper / DM commands
+  fortnite.stream.on('friend:message', async (msg) => {
+    const args = msg.body.split(" ");
     switch (args[0]) {
       case "!skin":
         await fortnite.me.setCharacter(args[1]);
@@ -104,7 +113,8 @@ request('https://benbotfn.tk/api/v1/newCosmetics', { json: true }, (err, res, bo
 client.on('message', async (message) => {
   if (message.author.bot) return;
   const args = message.content.split(" ");
-  
+
+  // Staff-only commands
   if (
     (message.member.roles.cache.some(r => r.id === '614174010204225716') ||
      message.member.roles.cache.some(r => r.id === '642737555728629772')) &&
@@ -114,14 +124,20 @@ client.on('message', async (message) => {
       case "+listplayers":
         let dPlayers = '';
         for (const pid of players) {
-          const profile = await fortnite.launcher.getAccount(pid);
-          dPlayers += `${profile.displayName}: ${pid}\n`;
+          try {
+            const profile = await fortnite.account.fetch(pid);
+            dPlayers += `${profile.displayName}: ${pid}\n`;
+          } catch {
+            dPlayers += `${pid}\n`;
+          }
         }
         message.channel.send({ embed: { color: 3066993, title: "Users in the lobby", description: dPlayers, timestamp: new Date() } });
         break;
+
       case "+kick":
         fortnite.party.kick(args[1]);
         break;
+
       case "+ban":
         fortnite.party.kick(args[1]);
         fs.readFile('./blacklist.json', 'utf8', (err, data) => {
@@ -131,6 +147,7 @@ client.on('message', async (message) => {
           fs.writeFile('./blacklist.json', JSON.stringify(list), () => {});
         });
         break;
+
       case "+unban":
         fs.readFile('./blacklist.json', 'utf8', (err, data) => {
           if (err) return;
@@ -139,8 +156,37 @@ client.on('message', async (message) => {
           fs.writeFile('./blacklist.json', JSON.stringify(list), () => {});
         });
         break;
+
+      // ✅ NEW COMMAND: Change playlist/mode
+      case "+mode":
+        if (!args[1]) {
+          return message.channel.send("Usage: +mode <solos|duos|squads|rumble>");
+        }
+        let playlistId;
+        switch (args[1].toLowerCase()) {
+          case "solos":
+            playlistId = "playlist_defaultsolo"; break;
+          case "duos":
+            playlistId = "playlist_defaultduo"; break;
+          case "squads":
+            playlistId = "playlist_defaultsquad"; break;
+          case "rumble":
+            playlistId = "playlist_respawn_24"; break;
+          default:
+            return message.channel.send("Unknown mode. Options: solos, duos, squads, rumble.");
+        }
+        try {
+          await fortnite.party.setPlaylist(playlistId);
+          message.channel.send(`✅ Playlist set to **${args[1]}**`);
+        } catch (err) {
+          console.error("Failed to set playlist:", err);
+          message.channel.send("❌ Could not change playlist.");
+        }
+        break;
     }
   }
+
+  // Public commands
   else if (message.channel.id === PUBLIC_CHANNEL_ID) {
     switch (args[0]) {
       case "+newitems":
@@ -156,4 +202,4 @@ client.on('message', async (message) => {
   }
 });
 
-client.login("YOUR_DISCORD_BOT_TOKEN");
+client.login(process.env.DISCORD_TOKEN);
