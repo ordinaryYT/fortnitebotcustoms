@@ -1,5 +1,6 @@
 const { Client } = require('discord.js');
-const { Fortnite } = require('epicgames-fortnite-client');
+// ✅ Fixed import
+const Fortnite = require('epicgames-fortnite-client');
 const fs = require('fs');
 const request = require('request');
 
@@ -12,7 +13,17 @@ const ADMIN_CHANNEL_ID = '650615163283570689';
 let players = [];
 let itemList = '';
 
-const fortnite = new Fortnite({
+// In case the module doesn't export a constructor directly
+const FortniteClass = (typeof Fortnite === 'function')
+  ? Fortnite
+  : (Fortnite.Client || Fortnite.Fortnite || null);
+
+if (!FortniteClass) {
+  console.error("❌ Could not find a valid Fortnite class export in epicgames-fortnite-client");
+  process.exit(1);
+}
+
+const fortnite = new FortniteClass({
   debugger: () => {},
   credentials: {
     deviceAuth: {
